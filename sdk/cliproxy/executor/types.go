@@ -82,6 +82,9 @@ const (
 	LCPMinPrefixLengthMetadataKey = "lcp_min_prefix_length"
 	// CallerScopeMetadataKey isolates inferred session identities between downstream callers.
 	CallerScopeMetadataKey = "caller_scope"
+	// AccessScopeMetadataKey carries the access scope of the authenticated client key in
+	// Options.Metadata, and is the top-level field naming a credential's scope in its auth JSON.
+	AccessScopeMetadataKey = "access_scope"
 	// SessionAffinityProviderMetadataKey carries the affinity selection namespace
 	// (provider string, e.g. the literal "mixed" pool key) used by SessionAffinitySelector.Pick,
 	// so OnResult keys the session cache identically to how selection read it.

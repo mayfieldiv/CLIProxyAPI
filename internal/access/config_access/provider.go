@@ -6,41 +6,49 @@ import (
 	"strings"
 
 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v8/sdk/access"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
+	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 	sdkconfig "github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
 )
 
 // Register ensures the config-access provider is available to the access manager.
 func Register(cfg *sdkconfig.SDKConfig) {
 	if cfg == nil {
+		coreauth.SetAccessScopeEnforced(false)
 		sdkaccess.UnregisterProvider(sdkaccess.AccessProviderTypeConfigAPIKey)
 		return
 	}
 
 	keys := normalizeKeys(cfg.APIKeys)
-	if len(keys) == 0 {
+	coreauth.SetAccessScopeEnforced(len(cfg.ScopedAPIKeys) > 0)
+	if len(keys) == 0 && len(cfg.ScopedAPIKeys) == 0 {
 		sdkaccess.UnregisterProvider(sdkaccess.AccessProviderTypeConfigAPIKey)
 		return
 	}
 
 	sdkaccess.RegisterProvider(
 		sdkaccess.AccessProviderTypeConfigAPIKey,
-		newProvider(sdkaccess.DefaultAccessProviderName, keys),
+		newProvider(sdkaccess.DefaultAccessProviderName, keys, cfg.ScopedAPIKeys),
 	)
 }
 
 type provider struct {
 	name string
-	keys map[string]struct{}
+	// keys maps each client key to its access scope, empty for unscoped keys.
+	keys map[string]string
 }
 
-func newProvider(name string, keys []string) *provider {
+func newProvider(name string, keys []string, scopedKeys []sdkconfig.ScopedAPIKey) *provider {
 	providerName := strings.TrimSpace(name)
 	if providerName == "" {
 		providerName = sdkaccess.DefaultAccessProviderName
 	}
-	keySet := make(map[string]struct{}, len(keys))
+	keySet := make(map[string]string, len(keys)+len(scopedKeys))
 	for _, key := range keys {
-		keySet[key] = struct{}{}
+		keySet[key] = ""
+	}
+	for _, entry := range scopedKeys {
+		keySet[strings.TrimSpace(entry.Key)] = strings.TrimSpace(entry.Scope)
 	}
 	return &provider{name: providerName, keys: keySet}
 }
@@ -89,13 +97,15 @@ func (p *provider) Authenticate(_ context.Context, r *http.Request) (*sdkaccess.
 		if candidate.value == "" {
 			continue
 		}
-		if _, ok := p.keys[candidate.value]; ok {
+		if scope, ok := p.keys[candidate.value]; ok {
+			metadata := map[string]string{"source": candidate.source}
+			if scope != "" {
+				metadata[cliproxyexecutor.AccessScopeMetadataKey] = scope
+			}
 			return &sdkaccess.Result{
 				Provider:  p.Identifier(),
 				Principal: candidate.value,
-				Metadata: map[string]string{
-					"source": candidate.source,
-				},
+				Metadata:  metadata,
 			}, nil
 		}
 	}

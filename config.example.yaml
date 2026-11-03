@@ -122,6 +122,12 @@ access:
     - "your-api-key-1"
     - "your-api-key-2"
     - "your-api-key-3"
+  # Client keys confined to credentials with the same top-level "access_scope" in their auth
+  # JSON (set at login with -access-scope). Configuring any entry makes scoping mandatory:
+  # a credential or key with no scope, including keys in api-keys, can no longer be used.
+  # scoped-api-keys:
+  #   - key: "your-scoped-key"
+  #     scope: "team-a"
 
 # Optional credential concurrency and observation contracts.
 

@@ -99,6 +99,11 @@ type SDKConfig struct {
 	// APIKeys is a list of keys for authenticating clients to this proxy server.
 	APIKeys []string `yaml:"api-keys" json:"api-keys"`
 
+	// ScopedAPIKeys authenticate clients like APIKeys and confine each client to
+	// credentials carrying the same access scope. Configuring any of them makes scoping
+	// mandatory for every request, so keys in APIKeys can no longer select a credential.
+	ScopedAPIKeys []ScopedAPIKey `yaml:"scoped-api-keys,omitempty" json:"scoped-api-keys,omitempty"`
+
 	// PassthroughHeaders controls whether upstream response headers are forwarded to downstream clients.
 	// Default is false (disabled).
 	PassthroughHeaders bool `yaml:"passthrough-headers" json:"passthrough-headers"`
@@ -109,6 +114,32 @@ type SDKConfig struct {
 	// NonStreamKeepAliveInterval controls how often blank lines are emitted for non-streaming responses.
 	// <= 0 disables keep-alives. Value is in seconds.
 	NonStreamKeepAliveInterval int `yaml:"nonstream-keepalive-interval,omitempty" json:"nonstream-keepalive-interval,omitempty"`
+}
+
+// ScopedAPIKey binds one client key to one access scope.
+type ScopedAPIKey struct {
+	Key   string `yaml:"key" json:"key"`
+	Scope string `yaml:"scope" json:"scope"`
+}
+
+// ValidateScopedAPIKeys rejects entries that could not authenticate or scope a client.
+// Dropping one instead could leave no key configured, which allows anonymous access.
+func (c *SDKConfig) ValidateScopedAPIKeys() error {
+	seen := make(map[string]struct{}, len(c.ScopedAPIKeys))
+	for index, entry := range c.ScopedAPIKeys {
+		key := strings.TrimSpace(entry.Key)
+		if key == "" {
+			return fmt.Errorf("access.scoped-api-keys[%d].key must not be empty", index)
+		}
+		if strings.TrimSpace(entry.Scope) == "" {
+			return fmt.Errorf("access.scoped-api-keys[%d].scope must not be empty", index)
+		}
+		if _, duplicate := seen[key]; duplicate {
+			return fmt.Errorf("access.scoped-api-keys[%d].key duplicates an earlier entry", index)
+		}
+		seen[key] = struct{}{}
+	}
+	return nil
 }
 
 // TLSHandshakeTimeout returns the configured upstream TLS handshake bound

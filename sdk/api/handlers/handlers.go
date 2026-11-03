@@ -293,6 +293,9 @@ func requestExecutionMetadata(ctx context.Context) map[string]any {
 	if callerScope := requestCallerScope(ginCtx); callerScope != "" {
 		meta[coreexecutor.CallerScopeMetadataKey] = callerScope
 	}
+	if accessScope := RequestAccessScope(ginCtx); accessScope != "" {
+		meta[coreexecutor.AccessScopeMetadataKey] = accessScope
+	}
 	if disallowFreeAuthFromContext(ctx) {
 		meta[coreexecutor.DisallowFreeAuthMetadataKey] = true
 	}
@@ -355,6 +358,16 @@ func requestCallerScope(ginCtx *gin.Context) string {
 		return ""
 	}
 	return coresession.CallerScope(fmt.Sprint(value))
+}
+
+// RequestAccessScope returns the scope of the access key that authenticated the request.
+func RequestAccessScope(ginCtx *gin.Context) string {
+	if ginCtx == nil {
+		return ""
+	}
+	value, _ := ginCtx.Get("accessMetadata")
+	metadata, _ := value.(map[string]string)
+	return metadata[coreexecutor.AccessScopeMetadataKey]
 }
 
 func addCallerScopeMetadata(meta map[string]any, callerScope string) {
