@@ -22,6 +22,9 @@ type LoginOptions struct {
 	// CallbackPort overrides the local OAuth callback port when set (>0).
 	CallbackPort int
 
+	// AccessScope is persisted on the saved credential as its access_scope.
+	AccessScope string
+
 	// Prompt allows the caller to provide interactive input when needed.
 	Prompt func(prompt string) (string, error)
 }
@@ -48,6 +51,7 @@ func DoCodexLogin(cfg *config.Config, options *LoginOptions) {
 	authOpts := &sdkAuth.LoginOptions{
 		NoBrowser:    options.NoBrowser,
 		CallbackPort: options.CallbackPort,
+		AccessScope:  options.AccessScope,
 		Metadata:     map[string]string{},
 		Prompt:       promptFn,
 	}

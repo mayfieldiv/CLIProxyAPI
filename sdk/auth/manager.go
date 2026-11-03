@@ -12,6 +12,7 @@ import (
 	xaiauth "github.com/router-for-me/CLIProxyAPI/v8/internal/auth/xai"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
+	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 )
 
 // Manager aggregates authenticators and coordinates persistence via a token store.
@@ -126,6 +127,13 @@ func (m *Manager) Login(ctx context.Context, provider string, cfg *config.Config
 	}
 	if adoptXAICredential {
 		adoptLegacyXAIFileName(record, legacyXAICredential)
+	}
+
+	if opts != nil && strings.TrimSpace(opts.AccessScope) != "" {
+		if record.Metadata == nil {
+			record.Metadata = make(map[string]any)
+		}
+		record.Metadata[cliproxyexecutor.AccessScopeMetadataKey] = strings.TrimSpace(opts.AccessScope)
 	}
 
 	savedPath, err := m.store.Save(coreauth.WithAuthCreationIntent(ctx), record)

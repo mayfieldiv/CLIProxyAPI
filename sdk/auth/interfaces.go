@@ -17,8 +17,10 @@ type LoginOptions struct {
 	NoBrowser    bool
 	ProjectID    string
 	CallbackPort int
-	Metadata     map[string]string
-	Prompt       func(prompt string) (string, error)
+	// AccessScope is persisted on the saved credential as its access_scope.
+	AccessScope string
+	Metadata    map[string]string
+	Prompt      func(prompt string) (string, error)
 }
 
 // Authenticator manages login and optional refresh flows for a provider.

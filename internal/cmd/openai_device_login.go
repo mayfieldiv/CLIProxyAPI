@@ -34,6 +34,7 @@ func DoCodexDeviceLogin(cfg *config.Config, options *LoginOptions) {
 	authOpts := &sdkAuth.LoginOptions{
 		NoBrowser:    options.NoBrowser,
 		CallbackPort: options.CallbackPort,
+		AccessScope:  options.AccessScope,
 		Metadata: map[string]string{
 			codexLoginModeMetadataKey: codexLoginModeDevice,
 		},
