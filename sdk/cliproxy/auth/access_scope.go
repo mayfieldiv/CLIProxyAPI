@@ -9,10 +9,9 @@ import (
 
 var accessScopeEnforced atomic.Bool
 
-// SetAccessScopeEnforced turns on strict credential scoping for selection. While
-// enforced, a credential is selectable only when the request's access scope and the
-// credential's access_scope are both non-empty and equal, so a request that lost its
-// scope and a login that was never classified both fail closed.
+// SetAccessScopeEnforced makes a request without an access scope unable to select any
+// credential, so a path that lost its scope fails closed. Scoped requests are confined to
+// their own credentials whether or not this is set.
 //
 // Home dispatch does not consult this rule; scoped keys are unsupported in Home mode.
 func SetAccessScopeEnforced(enforced bool) {
@@ -20,10 +19,10 @@ func SetAccessScopeEnforced(enforced bool) {
 }
 
 func accessScopeAllows(requestScope string, auth *Auth) bool {
-	if !accessScopeEnforced.Load() {
-		return true
+	if requestScope != "" {
+		return authMetadataString(auth, cliproxyexecutor.AccessScopeMetadataKey) == requestScope
 	}
-	return requestScope != "" && authMetadataString(auth, cliproxyexecutor.AccessScopeMetadataKey) == requestScope
+	return !accessScopeEnforced.Load()
 }
 
 func accessScopeFromMetadata(metadata map[string]any) string {

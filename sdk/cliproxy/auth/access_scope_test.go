@@ -161,6 +161,19 @@ func TestAccessScopeNotEnforcedKeepsUpstreamSelection(t *testing.T) {
 	}
 }
 
+func TestScopedRequestStaysConfinedWhenEnforcementIsOff(t *testing.T) {
+	manager := newAccessScopeManager(t, &RoundRobinSelector{}, schedulerTestExecutor{})
+	for attempt := 0; attempt < 4; attempt++ {
+		got, _, _, errPick := manager.pickNextMixed(context.Background(), []string{"codex"}, accessScopeTestModel, accessScopeOptions("team-a"), map[string]struct{}{})
+		if errPick != nil {
+			t.Fatalf("pickNextMixed() error = %v", errPick)
+		}
+		if got.ID != teamACredential {
+			t.Fatalf("scope team-a selected %q, want %q", got.ID, teamACredential)
+		}
+	}
+}
+
 func TestAccessScopeFailoverStaysInsideScope(t *testing.T) {
 	enforceAccessScopeForTest(t)
 	request := cliproxyexecutor.Request{Model: accessScopeTestModel}
