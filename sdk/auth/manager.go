@@ -129,16 +129,31 @@ func (m *Manager) Login(ctx context.Context, provider string, cfg *config.Config
 		adoptLegacyXAIFileName(record, legacyXAICredential)
 	}
 
-	if opts != nil && strings.TrimSpace(opts.AccessScope) != "" {
+	accessScope := ""
+	if opts != nil {
+		accessScope = strings.TrimSpace(opts.AccessScope)
+	}
+	if accessScope != "" {
 		if record.Metadata == nil {
 			record.Metadata = make(map[string]any)
 		}
-		record.Metadata[cliproxyexecutor.AccessScopeMetadataKey] = strings.TrimSpace(opts.AccessScope)
+		record.Metadata[cliproxyexecutor.AccessScopeMetadataKey] = accessScope
+	}
+	supersededCodexCredentials, errSuperseded := findSupersededCodexCredentials(ctx, m.store, record, accessScope)
+	if errSuperseded != nil {
+		return record, "", errSuperseded
 	}
 
 	savedPath, err := m.store.Save(coreauth.WithAuthCreationIntent(ctx), record)
 	if err != nil {
 		return record, "", err
+	}
+	if strings.TrimSpace(savedPath) != "" {
+		for _, superseded := range supersededCodexCredentials {
+			if errDelete := m.store.Delete(ctx, superseded.ID); errDelete != nil {
+				return record, savedPath, fmt.Errorf("cliproxy auth: Codex credential saved but superseded credential cleanup failed: %w", errDelete)
+			}
+		}
 	}
 	if legacyClaudeCredential != nil {
 		if strings.TrimSpace(savedPath) == "" {
