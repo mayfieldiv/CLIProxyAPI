@@ -116,3 +116,67 @@ func TestCodexAccessProgramRejection_ReturnsUpstreamErrorWithoutCooldown(t *test
 		})
 	}
 }
+
+// syncStreamRejectExecutor fails ExecuteStream before any stream exists, the
+// way a real HTTP 404 from the Codex upstream does.
+type syncStreamRejectExecutor struct {
+	*authFallbackExecutor
+	err   error
+	calls []string
+}
+
+func (e *syncStreamRejectExecutor) ExecuteStream(ctx context.Context, auth *Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (*cliproxyexecutor.StreamResult, error) {
+	e.calls = append(e.calls, auth.ID)
+	if e.err != nil {
+		return nil, e.err
+	}
+	return e.authFallbackExecutor.ExecuteStream(ctx, auth, req, opts)
+}
+
+func TestCodexAccessProgramRejection_SynchronousStreamErrorSkipsCooldown(t *testing.T) {
+	previous := quotaCooldownDisabled.Load()
+	quotaCooldownDisabled.Store(false)
+	t.Cleanup(func() { quotaCooldownDisabled.Store(previous) })
+
+	model := "gpt-6.2-sol"
+	first := &Auth{ID: "aa-codex-daybreak-sync", Provider: "codex"}
+	second := &Auth{ID: "bb-codex-daybreak-sync", Provider: "codex"}
+	executor := &syncStreamRejectExecutor{
+		authFallbackExecutor: &authFallbackExecutor{id: "codex"},
+		err:                  &statusBearingError{status: http.StatusNotFound, msg: daybreakUnavailableBody},
+	}
+
+	m := NewManager(nil, nil, nil)
+	m.RegisterExecutor(executor)
+	reg := registry.GetGlobalRegistry()
+	reg.RegisterClient(first.ID, "codex", []*registry.ModelInfo{{ID: model}})
+	reg.RegisterClient(second.ID, "codex", []*registry.ModelInfo{{ID: model}})
+	t.Cleanup(func() {
+		reg.UnregisterClient(first.ID)
+		reg.UnregisterClient(second.ID)
+	})
+	for _, auth := range []*Auth{first, second} {
+		if _, errRegister := m.Register(context.Background(), auth); errRegister != nil {
+			t.Fatalf("register %s: %v", auth.ID, errRegister)
+		}
+	}
+
+	request := cliproxyexecutor.Request{Model: model}
+	_, errStream := m.ExecuteStream(context.Background(), []string{"codex"}, request, cliproxyexecutor.Options{})
+	var statusErr interface{ StatusCode() int }
+	if !errors.As(errStream, &statusErr) || statusErr.StatusCode() != http.StatusNotFound || errStream.Error() != daybreakUnavailableBody {
+		t.Fatalf("error = %v, want upstream 404 with its body", errStream)
+	}
+	if len(executor.calls) != 1 {
+		t.Fatalf("upstream calls = %v, want one call without credential rotation", executor.calls)
+	}
+	for _, auth := range []*Auth{first, second} {
+		updated, ok := m.GetByID(auth.ID)
+		if !ok || updated == nil {
+			t.Fatalf("auth %s missing", auth.ID)
+		}
+		if state := updated.ModelStates[model]; updated.Unavailable || (state != nil && (state.Unavailable || !state.NextRetryAfter.IsZero())) {
+			t.Fatalf("auth %s cooled down after the rejection", auth.ID)
+		}
+	}
+}

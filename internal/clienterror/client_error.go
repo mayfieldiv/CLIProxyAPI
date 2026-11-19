@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/MoeForge/moego/ojson"
@@ -153,8 +154,9 @@ func IsItemNotPersisted(message string) bool {
 // credential, and the client needs the upstream message to turn the program off.
 //
 // The upstream sends it as a bare {"detail": "..."} body with no error code, at
-// a 404 status that would otherwise cool the model for hours, so only its exact
-// wording identifies it.
+// a 404 status that would otherwise cool the model for hours, so only its
+// wording identifies it. Transports nest that text under several keys, and a
+// missed shape brings the cooldown back, so every known nesting is checked.
 func IsAccessProgramRejection(err error) bool {
 	if err == nil {
 		return false
@@ -170,15 +172,25 @@ func IsAccessProgramRejection(err error) bool {
 	if body == "" || !ojson.Valid(body) {
 		return false
 	}
-	for _, path := range []string{"detail", "body.detail", "error.message", "message", "body.error.message", "response.error.message"} {
+	for _, path := range accessProgramRejectionPaths {
 		msg := strings.ToLower(strings.TrimSpace(ojson.Get(body, path).String()))
 		msg = strings.ReplaceAll(msg, "’", "'")
-		if strings.HasPrefix(msg, "daybreak isn't available") {
+		if accessProgramRejectionPattern.MatchString(msg) {
 			return true
 		}
 	}
 	return false
 }
+
+var accessProgramRejectionPaths = []string{
+	"detail", "detail.message", "message", "error", "error.message", "error.detail",
+	"body.detail", "body.detail.message", "body.error.message", "body.error.detail",
+	"response.error.message", "response.error.detail",
+}
+
+// Anchored at the start so a model or plan error that merely mentions Daybreak
+// keeps its cooldown; the optional program name covers "Daybreak Blue/Red".
+var accessProgramRejectionPattern = regexp.MustCompile(`^daybreak( blue| red)? (isn't|is not) available\b`)
 
 // IsClaudeThreadNotFound reports the Claude 404 response for a stale
 // previous_message_id continuation from either a structured JSON response

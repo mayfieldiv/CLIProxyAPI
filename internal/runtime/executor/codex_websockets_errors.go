@@ -86,6 +86,11 @@ func clearCodexReasoningReplayOnWebsocketError(ctx context.Context, scope codexR
 func buildCodexWebsocketErrorPayload(payload []byte, status int) []byte {
 	doc := ojson.NewDoc([]byte(`{}`))
 	_ = doc.Set("status", status)
+	// A bare {"detail": ...} rejection carries its meaning only in that text;
+	// dropping it would leave just the generic fallback below to classify.
+	if detailNode := ojson.GetBytesNoCopy(payload, "detail"); detailNode.Exists() {
+		_ = doc.SetRawBytes("detail", []byte(detailNode.Raw))
+	}
 
 	if bodyNode := ojson.GetBytesNoCopy(payload, "body"); bodyNode.Exists() {
 		_ = doc.SetRawBytes("body", []byte(bodyNode.Raw))

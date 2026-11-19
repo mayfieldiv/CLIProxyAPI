@@ -246,7 +246,11 @@ func TestIsRequestFault(t *testing.T) {
 			},
 			want: true,
 		},
+		{name: "Daybreak Red is not available", status: http.StatusNotFound, err: errors.New(`{"detail":"Daybreak Red is not available for this model."}`), want: true},
+		{name: "Daybreak unavailable in nested detail", status: http.StatusNotFound, err: errors.New(`{"detail":{"message":"Daybreak isn't available for this model."}}`), want: true},
+		{name: "Daybreak unavailable in in-stream error detail", status: http.StatusBadGateway, err: errors.New(`{"response":{"error":{"detail":"Daybreak isn't available for this model."}}}`), want: true},
 		{name: "Daybreak wording behind rate limit", status: http.StatusTooManyRequests, err: errors.New(`{"detail":"Daybreak isn't available for this model."}`)},
+		{name: "Daybreak word without availability", status: http.StatusNotFound, err: errors.New(`{"detail":"Daybreak is unavailable during maintenance."}`)},
 		{name: "model unavailable detail", status: http.StatusNotFound, err: errors.New(`{"detail":"The model gpt-6.2-sol isn't available for your plan."}`)},
 		{name: "Daybreak mentioned in other detail", status: http.StatusNotFound, err: errors.New(`{"detail":"Not Found. Daybreak isn't available for this model."}`)},
 		{
