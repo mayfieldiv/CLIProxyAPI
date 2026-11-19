@@ -2,6 +2,7 @@ package accessprograms
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -265,6 +266,89 @@ func TestConcurrentRequestsShareOneFetch(t *testing.T) {
 	}
 	for _, result := range results {
 		wantCyber(t, result, "standard", "daybreak_blue")
+	}
+}
+
+func TestLoginNeedingSignInDoesNotHideItsScopesPrograms(t *testing.T) {
+	f := newFixture(t)
+	upstream := newUpstreamCatalog(t, map[string][]string{"gpt-6-sol": {"standard", "daybreak_blue"}})
+	f.addCodexLogin(t, "ap-live", testScope, upstream, "gpt-6-sol")
+	dead := newUpstreamCatalog(t, nil)
+	dead.set(http.StatusUnauthorized, nil)
+	f.register(t, &coreauth.Auth{
+		ID:             "ap-dead",
+		Provider:       "codex",
+		Status:         coreauth.StatusError,
+		Unavailable:    true,
+		RequiresSignIn: true,
+		LastError:      &coreauth.Error{Code: "unauthorized", HTTPStatus: http.StatusUnauthorized},
+		Attributes:     map[string]string{"base_url": dead.server.URL},
+		Metadata: map[string]any{
+			"type":                                  "codex",
+			"access_token":                          "token-ap-dead",
+			"account_id":                            "account-ap-dead",
+			cliproxyexecutor.AccessScopeMetadataKey: testScope,
+		},
+	}, []string{"gpt-6-sol"})
+
+	wantCyber(t, f.cyber(t, "gpt-6-sol"), "standard", "daybreak_blue")
+	if got := dead.requests.Load(); got != 0 {
+		t.Fatalf("requests with the rejected login = %d, want 0", got)
+	}
+}
+
+func TestFailedFetchLeavesTheLoginUntouched(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests, http.StatusInternalServerError} {
+		f := newFixture(t)
+		upstream := newUpstreamCatalog(t, nil)
+		upstream.set(status, nil)
+		id := fmt.Sprintf("ap-untouched-%d", status)
+		f.addCodexLogin(t, id, testScope, upstream, "gpt-6-sol")
+		before, _ := f.manager.GetByID(id)
+
+		wantCyber(t, f.cyber(t, "gpt-6-sol"), "standard")
+
+		after, _ := f.manager.GetByID(id)
+		if after.Status != before.Status || after.Unavailable || after.LastError != nil || len(after.ModelStates) != 0 ||
+			after.Quota.Exceeded || !after.NextRetryAfter.IsZero() {
+			t.Fatalf("status %d changed the login: %+v", status, after)
+		}
+	}
+}
+
+func TestSlowUpstreamDelaysTheCatalogByAtMostTheFetchTimeout(t *testing.T) {
+	f := newFixture(t)
+	upstream := newUpstreamCatalog(t, map[string][]string{"gpt-6-sol": {"standard", "daybreak_blue"}})
+	gate := make(chan struct{})
+	upstream.mu.Lock()
+	upstream.gate = gate
+	upstream.mu.Unlock()
+	t.Cleanup(func() { close(gate) })
+	f.addCodexLogin(t, "ap-slow", testScope, upstream, "gpt-6-sol")
+
+	start := time.Now()
+	wantCyber(t, f.cyber(t, "gpt-6-sol"), "standard")
+	if elapsed := time.Since(start); elapsed > fetchTimeout+time.Second {
+		t.Fatalf("catalog took %v with a hung upstream, want at most about %v", elapsed, fetchTimeout)
+	}
+}
+
+func TestCacheKeepsABoundedNumberOfClientVersionsPerLogin(t *testing.T) {
+	f := newFixture(t)
+	upstream := newUpstreamCatalog(t, map[string][]string{"gpt-6-sol": {"standard"}})
+	f.addCodexLogin(t, "ap-versions", testScope, upstream, "gpt-6-sol")
+
+	for i := range 20 {
+		f.clock.Advance(time.Second)
+		models := []map[string]any{templateEntry("gpt-6-sol")}
+		f.entitlements.Apply(t.Context(), Request{Scope: testScope, ClientVersion: fmt.Sprintf("0.%d.0", 1000+i)}, models)
+	}
+	f.entitlements.mu.Lock()
+	entries := len(f.entitlements.entries)
+	_, newestKept := f.entitlements.entries[cacheKey{authID: "ap-versions", clientVersion: "0.1019.0"}]
+	f.entitlements.mu.Unlock()
+	if entries != maxVersionsPerLogin || !newestKept {
+		t.Fatalf("cache entries = %d (newest kept: %t), want %d including the newest", entries, newestKept, maxVersionsPerLogin)
 	}
 }
 

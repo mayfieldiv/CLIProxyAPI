@@ -38,6 +38,8 @@ const (
 	// failureBackoff keeps a failing login from being fetched on every catalog request.
 	failureBackoff  = 30 * time.Second
 	maxCatalogBytes = 16 << 20
+	// maxVersionsPerLogin bounds the cache, whose version key comes from the client.
+	maxVersionsPerLogin = 4
 )
 
 var clientVersionPattern = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
@@ -55,6 +57,7 @@ type cacheEntry struct {
 	programs  programsBySlug
 	fetchedAt time.Time
 	retryAt   time.Time
+	storedAt  time.Time
 }
 
 // Entitlements overlays per-login access programs onto Codex client catalogs.
@@ -92,8 +95,9 @@ func (e *Entitlements) Apply(ctx context.Context, request Request, models []map[
 		return
 	}
 	var scoped []*coreauth.Auth
+	now := e.now()
 	for _, auth := range e.manager.List() {
-		if auth == nil || auth.Disabled || auth.Status == coreauth.StatusDisabled || !coreauth.InAccessScope(auth, request.Scope) {
+		if auth == nil || !coreauth.InAccessScope(auth, request.Scope) || !selectable(auth, now) {
 			continue
 		}
 		scoped = append(scoped, auth)
@@ -141,6 +145,20 @@ func (e *Entitlements) Apply(ctx context.Context, request Request, models []map[
 		}
 		setCyberPrograms(p.entry, intersect(lists))
 	}
+}
+
+// selectable mirrors the credential selector's terminal exclusions. A login that
+// needs signing in again never serves a request, so counting it would hide its
+// scope's programs behind a fetch that cannot succeed. A login that is only
+// cooling down still counts, since rotation returns to it.
+func selectable(auth *coreauth.Auth, now time.Time) bool {
+	if auth.Disabled || auth.Status == coreauth.StatusDisabled || coreauth.HasUnauthorizedAuthFailure(auth) {
+		return false
+	}
+	if expiry, ok := auth.AccessTokenExpirationTime(); ok && !expiry.IsZero() && !expiry.After(now) {
+		return false
+	}
+	return true
 }
 
 // servingAuths returns the scoped credentials that registered model, falling back
@@ -240,14 +258,34 @@ func (e *Entitlements) refresh(key cacheKey, auth *coreauth.Auth, userAgent stri
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	now := e.now()
 	entry := e.entries[key]
 	if errFetch != nil {
-		entry.retryAt = e.now().Add(failureBackoff)
+		entry.retryAt = now.Add(failureBackoff)
+		entry.storedAt = now
 		e.entries[key] = entry
 		log.WithField("auth_index", auth.EnsureIndex()).Warnf("codex access programs: catalog fetch failed: %v", errFetch)
+	} else {
+		e.entries[key] = cacheEntry{programs: programs, fetchedAt: now, storedAt: now}
+	}
+	e.evictOldVersionsLocked(key.authID)
+}
+
+// evictOldVersionsLocked keeps the most recently stored client versions of a login.
+func (e *Entitlements) evictOldVersionsLocked(authID string) {
+	var keys []cacheKey
+	for key := range e.entries {
+		if key.authID == authID {
+			keys = append(keys, key)
+		}
+	}
+	if len(keys) <= maxVersionsPerLogin {
 		return
 	}
-	e.entries[key] = cacheEntry{programs: programs, fetchedAt: e.now()}
+	sort.Slice(keys, func(i, j int) bool { return e.entries[keys[i]].storedAt.After(e.entries[keys[j]].storedAt) })
+	for _, key := range keys[maxVersionsPerLogin:] {
+		delete(e.entries, key)
+	}
 }
 
 func (e *Entitlements) fetch(ctx context.Context, auth *coreauth.Auth, clientVersion, userAgent string) (programsBySlug, error) {
