@@ -212,6 +212,44 @@ func TestIsRequestFault(t *testing.T) {
 			want: true,
 		},
 		{
+			// Verbatim upstream reply to access_programs.cyber=daybreak_blue.
+			name:   "Daybreak unavailable for model",
+			status: http.StatusNotFound,
+			err:    errors.New(`{"detail":"Daybreak isn't available for this model. Turn off Daybreak or choose another model."}`),
+			want:   true,
+		},
+		{
+			name:   "Daybreak unavailable with typographic apostrophe",
+			status: http.StatusForbidden,
+			err:    errors.New(`{"detail":"Daybreak isn’t available for this account."}`),
+			want:   true,
+		},
+		{
+			name: "Daybreak unavailable in websocket error body",
+			err: statusError{
+				status: http.StatusNotFound,
+				body:   `{"status":404,"body":{"detail":"Daybreak isn't available for this model. Turn off Daybreak or choose another model."},"error":{"type":"server_error","message":"Not Found"}}`,
+			},
+			want: true,
+		},
+		{
+			name:   "Daybreak unavailable as in-stream error",
+			status: http.StatusBadGateway,
+			err:    errors.New(`{"error":{"message":"Daybreak isn't available for this model. Turn off Daybreak or choose another model."}}`),
+			want:   true,
+		},
+		{
+			name: "Daybreak unavailable in response body",
+			err: responseBodyError{
+				status: http.StatusNotFound,
+				body:   `{"detail":"Daybreak isn't available for this model."}`,
+			},
+			want: true,
+		},
+		{name: "Daybreak wording behind rate limit", status: http.StatusTooManyRequests, err: errors.New(`{"detail":"Daybreak isn't available for this model."}`)},
+		{name: "model unavailable detail", status: http.StatusNotFound, err: errors.New(`{"detail":"The model gpt-6.2-sol isn't available for your plan."}`)},
+		{name: "Daybreak mentioned in other detail", status: http.StatusNotFound, err: errors.New(`{"detail":"Not Found. Daybreak isn't available for this model."}`)},
+		{
 			// An upstream internal error is not a request fault: it must stay eligible
 			// for credential rotation and (credential, model) cooldown.
 			name:   "upstream unknown internal error",

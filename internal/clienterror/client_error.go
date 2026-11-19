@@ -100,6 +100,9 @@ func IsRequestFault(status int, err error) bool {
 	if IsClaudeThreadNotFound(status, err) {
 		return true
 	}
+	if IsAccessProgramRejection(err) {
+		return true
+	}
 	// Anthropic reports an exhausted API credit balance as 400 with an
 	// invalid_request_error body. Preserve credential cooldown and rotation
 	// without weakening generic 400 request-fault handling.
@@ -141,6 +144,40 @@ func IsItemNotPersisted(message string) bool {
 	return strings.Contains(lower, "item with id") &&
 		strings.Contains(lower, "not found") &&
 		strings.Contains(lower, "items are not persisted when `store` is set to false")
+}
+
+// IsAccessProgramRejection reports the Codex upstream refusing the request's
+// access_programs selection, such as Daybreak on a model that does not offer
+// it. The credential and model still serve requests without that selection, so
+// the refusal belongs to the request: it must neither cool down nor rotate the
+// credential, and the client needs the upstream message to turn the program off.
+//
+// The upstream sends it as a bare {"detail": "..."} body with no error code, at
+// a 404 status that would otherwise cool the model for hours, so only its exact
+// wording identifies it.
+func IsAccessProgramRejection(err error) bool {
+	if err == nil {
+		return false
+	}
+	body := strings.TrimSpace(err.Error())
+	type responseBodyProvider interface {
+		ResponseBody() []byte
+	}
+	var responseBody responseBodyProvider
+	if errors.As(err, &responseBody) && responseBody != nil && len(responseBody.ResponseBody()) > 0 {
+		body = strings.TrimSpace(string(responseBody.ResponseBody()))
+	}
+	if body == "" || !ojson.Valid(body) {
+		return false
+	}
+	for _, path := range []string{"detail", "body.detail", "error.message", "message", "body.error.message", "response.error.message"} {
+		msg := strings.ToLower(strings.TrimSpace(ojson.Get(body, path).String()))
+		msg = strings.ReplaceAll(msg, "’", "'")
+		if strings.HasPrefix(msg, "daybreak isn't available") {
+			return true
+		}
+	}
+	return false
 }
 
 // IsClaudeThreadNotFound reports the Claude 404 response for a stale
