@@ -18,9 +18,14 @@ func SetAccessScopeEnforced(enforced bool) {
 	accessScopeEnforced.Store(enforced)
 }
 
+// InAccessScope reports whether auth belongs to scope. No credential belongs to the empty scope.
+func InAccessScope(auth *Auth, scope string) bool {
+	return scope != "" && authMetadataString(auth, cliproxyexecutor.AccessScopeMetadataKey) == scope
+}
+
 func accessScopeAllows(requestScope string, auth *Auth) bool {
 	if requestScope != "" {
-		return authMetadataString(auth, cliproxyexecutor.AccessScopeMetadataKey) == requestScope
+		return InAccessScope(auth, requestScope)
 	}
 	return !accessScopeEnforced.Load()
 }
