@@ -1,10 +1,27 @@
 package openai
 
 import (
+	"github.com/gin-gonic/gin"
+	codexaccessprograms "github.com/router-for-me/CLIProxyAPI/v8/internal/client/codex/accessprograms"
 	codexmodels "github.com/router-for-me/CLIProxyAPI/v8/internal/client/codex/models"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 	responsesclaude "github.com/router-for-me/CLIProxyAPI/v8/internal/translator/claude/openai/responses"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/api/handlers"
 )
+
+// codexClientModelsResponseForRequest advertises the access programs of the
+// requesting scope's Codex logins. Unscoped requests get the template's value.
+func (h *OpenAIAPIHandler) codexClientModelsResponseForRequest(c *gin.Context, clientVersion string) map[string]any {
+	response := h.codexClientModelsResponse(clientVersion)
+	if models, ok := response["models"].([]map[string]any); ok {
+		h.codexEntitlements.Apply(c.Request.Context(), codexaccessprograms.Request{
+			Scope:         handlers.RequestAccessScope(c),
+			ClientVersion: clientVersion,
+			UserAgent:     c.GetHeader("User-Agent"),
+		}, models)
+	}
+	return response
+}
 
 func (h *OpenAIAPIHandler) codexClientModelsResponse(clientVersion ...string) map[string]any {
 	version := ""

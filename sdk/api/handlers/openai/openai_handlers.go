@@ -17,6 +17,7 @@ import (
 
 	"github.com/MoeForge/moego/ojson"
 	"github.com/gin-gonic/gin"
+	codexaccessprograms "github.com/router-for-me/CLIProxyAPI/v8/internal/client/codex/accessprograms"
 	codexmodels "github.com/router-for-me/CLIProxyAPI/v8/internal/client/codex/models"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/clienterror"
 	. "github.com/router-for-me/CLIProxyAPI/v8/internal/constant"
@@ -31,6 +32,7 @@ import (
 // It holds a pool of clients to interact with the backend service.
 type OpenAIAPIHandler struct {
 	*handlers.BaseAPIHandler
+	codexEntitlements *codexaccessprograms.Entitlements
 }
 
 // NewOpenAIAPIHandler creates a new OpenAI API handlers instance.
@@ -43,7 +45,8 @@ type OpenAIAPIHandler struct {
 //   - *OpenAIAPIHandler: A new OpenAI API handlers instance
 func NewOpenAIAPIHandler(apiHandlers *handlers.BaseAPIHandler) *OpenAIAPIHandler {
 	return &OpenAIAPIHandler{
-		BaseAPIHandler: apiHandlers,
+		BaseAPIHandler:    apiHandlers,
+		codexEntitlements: codexaccessprograms.New(apiHandlers.AuthManager),
 	}
 }
 
@@ -65,7 +68,7 @@ func (h *OpenAIAPIHandler) Models() []map[string]any {
 func (h *OpenAIAPIHandler) OpenAIModels(c *gin.Context) {
 	if _, ok := c.Request.URL.Query()["client_version"]; ok {
 		clientVersion := c.Query("client_version")
-		body, errMarshal := codexmodels.MarshalCompact(h.codexClientModelsResponse(clientVersion))
+		body, errMarshal := codexmodels.MarshalCompact(h.codexClientModelsResponseForRequest(c, clientVersion))
 		if errMarshal != nil {
 			c.JSON(http.StatusInternalServerError, handlers.ErrorResponse{
 				Error: handlers.ErrorDetail{
